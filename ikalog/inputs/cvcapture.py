@@ -18,11 +18,14 @@
 #  limitations under the License.
 #
 import os
+import sys
 import ctypes
 import time
 import threading
 
 import cv2
+
+sys.path.append(os.getcwd())
 
 from ikalog.utils import *
 
