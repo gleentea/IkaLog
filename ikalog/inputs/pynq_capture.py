@@ -25,8 +25,9 @@ import traceback
 
 import cv2
 import numpy as np
+from pynq.drivers import video
 from pynq.drivers.video import HDMI
-
+from cffi import FFI
 
 from ikalog.utils import *
 from ikalog.inputs import VideoInput
@@ -49,6 +50,13 @@ class PynqCapture(VideoInput):
     def _cleanup_driver_func(self):
         self.lock.acquire()
         try:
+            if self.ffi is not None:
+                self.ffi = None
+
+            if self.framebuffer is not None:
+                for fb in self.framebuffer:
+                    del fb
+
             if self.hdmi_out is not None:
                 self.hdmi_out.stop()
                 self.hdmi_out = None
@@ -67,20 +75,15 @@ class PynqCapture(VideoInput):
 
     # override
     def _select_device_by_index_func(self, source):
+        self._cleanup_driver_func()
         self.lock.acquire()
         try:
-            if self.is_active():
-                if self.hdmi_out is not None:
-                    self.hdmi_out.stop()
-
-                if self.hdmi_in is not None:
-                    self.hdmi_in.stop()
-
-            self.reset()
+            self.ffi = FFI()
             self.hdmi_in = HDMI('in', init_timeout=10)
             if self._enable_output:
                 self.hdmi_out = HDMI('out', frame_list=self.hdmi_in.frame_list)
-                self.hdmi_out.mode(2)  # 2=720p, 4=1080p
+                mode = 4 # self.hdmi_in.mode()
+                self.hdmi_out.mode(mode)
 
             time.sleep(1)
 
@@ -91,12 +94,24 @@ class PynqCapture(VideoInput):
             self.hdmi_in_geom = \
                 (self.hdmi_in.frame_width(), self.hdmi_in.frame_height())
 
-            IkaUtils.dprint('%s: resolution %dx%d' % self.hdmi_in_geom)
+            self.framebuffer = []
+            for i in range(video.VDMA_DICT['NUM_FSTORES']):
+                pointer = self.ffi.cast('uint8_t *', self.hdmi_in.frame_addr(i))
+                buffer_size = video.MAX_FRAME_WIDTH * video.MAX_FRAME_HEIGHT * 3 # 3 == sizeof(RGB)
+                _bf = self.ffi.buffer(pointer, buffer_size)
+                bf = np.frombuffer(_bf,np.uint8).reshape(1080,1920,3)
+                self.framebuffer.append(bf[:self.hdmi_in_geom[1],:self.hdmi_in_geom[0],::-1])
+
+            IkaUtils.dprint('%s: resolution %dx%d' % (self, self.hdmi_in_geom[0], self.hdmi_in_geom[1]))
 
         except:
             print(traceback.format_exc())
             self.hdmi_in = None
             self.hdmi_out = None
+            if self.framebuffer is not None:
+                for fb in self.framebuffer:
+                    del fb
+            self.ffi = None
 
         finally:
             self.lock.release()
@@ -124,33 +139,41 @@ class PynqCapture(VideoInput):
     # override
     def _read_frame_func(self):
         t1 = time.time()
-        if hasattr(self.hdmi_in, 'frame_raw2'):
+        if self._mode == 1 and hasattr(self.hdmi_in, 'frame_raw2'):
             # Modified version of PYNQ library has faster capture function.
             frame = self.hdmi_in.frame_raw2()
+        elif self._mode == 2:
+            index = self.hdmi_in.frame_index()
+            self.hdmi_in.frame_index_next()
+            frame = self.framebuffer[index]
         else:
             # This function is supported in original version, but 10X slow.
             frame_raw = self.hdmi_in.frame_raw()
             frame = np.frombuffer(frame_raw, dtype=np.uint8)
             frame = frame.reshape(1080, 1920, 3)
-            frame = frame[0:720, 0:1280, :]
+            frame = frame[0:720, 0:1280, ::-1]
         t2 = time.time()
         if self._debug:
             print('read_frame_func: %6.6f' % (t2 - t1))
         return frame
 
-    def __init__(self, enable_output=False, debug=False):
+    def __init__(self, enable_output=False, debug=False, mode=2):
         self.hdmi_in = None
         self.hdmi_out = None
+        self.ffi = None
+        self.framebuffer = None
         self._enable_output = enable_output
         self._debug = debug
+        self._mode = mode
 
         IkaUtils.dprint(
-            '%s: debug %s enable_output %s' %
-            (self, self._debug, self._enable_output))
+            '%s: debug %s enable_output %s mode %s' %
+            (self, self._debug, self._enable_output, self._mode))
 
         super(PynqCapture, self).__init__()
 
 if __name__ == "__main__":
+    from PIL import Image
     obj = PynqCapture()
     obj.select_source(0)
     time.sleep(1)
@@ -159,3 +182,5 @@ if __name__ == "__main__":
     t = time.time()
     while (time.time() - t) < 100:
         frame = obj.read_frame()
+        Image.frombytes("RGB",(1280,720),bytes(frame)).save("dump/test_%d.jpg"%k)
+        k = k+1
