@@ -146,7 +146,7 @@ class PynqCapture(VideoInput):
         elif self._mode == 2:
             index = self.hdmi_in.frame_index()
             self.hdmi_in.frame_index_next()
-            frame = copy.deepcopy(self.framebuffer[index])
+            frame = self.framebuffer[index]
         else:
             # This function is supported in original version, but 10X slow.
             frame_raw = self.hdmi_in.frame_raw()
