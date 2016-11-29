@@ -28,6 +28,7 @@ import numpy as np
 from pynq.drivers import video
 from pynq.drivers.video import HDMI
 from cffi import FFI
+import copy
 
 from ikalog.utils import *
 from ikalog.inputs import VideoInput
@@ -141,11 +142,11 @@ class PynqCapture(VideoInput):
         t1 = time.time()
         if self._mode == 1 and hasattr(self.hdmi_in, 'frame_raw2'):
             # Modified version of PYNQ library has faster capture function.
-            frame = self.hdmi_in.frame_raw2()
+            frame = self.hdmi_in.frame_raw2().reshape(1080,1920,3)[:720,:1280,::-1]
         elif self._mode == 2:
             index = self.hdmi_in.frame_index()
             self.hdmi_in.frame_index_next()
-            frame = self.framebuffer[index]
+            frame = copy.deepcopy(self.framebuffer[index])
         else:
             # This function is supported in original version, but 10X slow.
             frame_raw = self.hdmi_in.frame_raw()
