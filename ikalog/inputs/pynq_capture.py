@@ -98,10 +98,12 @@ class PynqCapture(VideoInput):
             self.framebuffer = []
             for i in range(video.VDMA_DICT['NUM_FSTORES']):
                 pointer = self.ffi.cast('uint8_t *', self.hdmi_in.frame_addr(i))
-                buffer_size = video.MAX_FRAME_WIDTH * video.MAX_FRAME_HEIGHT * 3 # 3 == sizeof(RGB)
+                #buffer_size = video.MAX_FRAME_WIDTH * video.MAX_FRAME_HEIGHT * 3 # 3 == sizeof(RGB)
+                buffer_size = self.hdmi_in_geom[0] * self.hdmi_in_geom[1] * 3
                 _bf = self.ffi.buffer(pointer, buffer_size)
-                bf = np.frombuffer(_bf,np.uint8).reshape(1080,1920,3)
-                self.framebuffer.append(bf[:self.hdmi_in_geom[1],:self.hdmi_in_geom[0],::-1])
+                bf = np.frombuffer(_bf,np.uint8).reshape(self.hdmi_in_geom[1],self.hdmi_in_geom[0],3)
+                #self.framebuffer.append(bf[:self.hdmi_in_geom[1],:self.hdmi_in_geom[0],:])
+                self.framebuffer.append(bf)
 
             IkaUtils.dprint('%s: resolution %dx%d' % (self, self.hdmi_in_geom[0], self.hdmi_in_geom[1]))
 
@@ -175,7 +177,7 @@ class PynqCapture(VideoInput):
 
 if __name__ == "__main__":
     from PIL import Image
-    obj = PynqCapture()
+    obj = PynqCapture(debug=True)
     obj.select_source(0)
     time.sleep(1)
 
@@ -183,5 +185,5 @@ if __name__ == "__main__":
     t = time.time()
     while (time.time() - t) < 100:
         frame = obj.read_frame()
-        Image.frombytes("RGB",(1280,720),bytes(frame)).save("dump/test_%d.jpg"%k)
+        Image.frombytes("RGB",(frame.shape[1],frame.shape[0]),bytes(frame)).save("dump/test_%d.jpg"%k)
         k = k+1
